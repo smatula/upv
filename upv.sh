@@ -10,6 +10,9 @@ JOBS_ARRAY=()
 # Default PLATFORM
 PLATFORM="ocp"
 
+# Default LP_TAG
+LP_TAG="\-lp\-interop"
+
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -47,6 +50,11 @@ done
 
 set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
 
+if [[ $PLATFORM == "hypershift" ]]
+then
+     LP_TAG="\-lp\-rosa\-hypershift"
+fi
+
 # INPUT VALUES
 echo "MONTH        = ${MONTH}"
 echo "DAY          = ${DAY}"
@@ -54,6 +62,8 @@ echo "OLD VERSION  = ${OLD_VER}"
 echo "NEW VERSION  = ${NEW_VER}"
 echo "INPUTT FILE  = ${INPUT_FILE}"
 echo "JOB NAME     = ${1}"
+echo "PLATFORM     = ${PLATFORM}"
+echo "LP_TAG       = ${LP_TAG}"
 echo "PWD          = " `pwd`
 
 # PROCESS JOBS
@@ -81,7 +91,6 @@ while IFS= read -r ENTRY; do
     CONFIG_PATH=${JOB_PATH/jobs/config}
 
     echo "JOB PATH     = ${JOB_PATH}"
-    echo "CONFIG PATH  = ${CONFIG_PATH}"
 
     # Set NEW_JOB using FMT1 (4.12) - ENTRY name with new version
     NEW_JOB=${ENTRY//${OLD_VER}/${NEW_VER}}
@@ -109,8 +118,10 @@ while IFS= read -r ENTRY; do
         NEW_JOB=${ENTRY//${E_OLD_VER}/${E_NEW_VER}}
     fi
 
-    # Find CONFIG_FILE in CONFIG_PATH Searching for files with -lp-interop, PLATFORM and OLD_VER
-    CONFIG_FILE=`ls $CONFIG_PATH | grep -i "\-lp\-interop" | grep -i $PLATFORM | grep -i $OLD_VER || :`
+    echo "CONFIG PATH  = ${CONFIG_PATH}"
+
+    # Find CONFIG_FILE in CONFIG_PATH Searching for files with LP_TAG, PLATFORM and OLD_VER
+    CONFIG_FILE=`ls $CONFIG_PATH | grep -i $LP_TAG | grep -i $PLATFORM | grep -i $OLD_VER || :`
 
     # If more than 1 config found get PROD from scenario label
     # If ENTRY contains PROD then we have our config 
@@ -119,9 +130,15 @@ while IFS= read -r ENTRY; do
     then
        echo "More than one"
        CONFIGS=($CONFIG_FILE)
+       CONFIG_FILE=""
        for i in "${CONFIGS[@]}"
        do
            PROD=`sed -n -e 's/^.*scenario //p' $CONFIG_PATH/$i`
+           if [ -z "$PROD" ]
+           then
+               PROD=`sed "s/__/&\n/;s/.*\n//;s/-$PLATFORM/\n&/;s/\n.*//" <<< "$i"`
+           fi
+
            echo "PROD         = ${PROD}"
            if [[ $ENTRY == *"$PROD"* ]]
            then
@@ -133,11 +150,11 @@ while IFS= read -r ENTRY; do
     fi 
 
     # No CONFIG_FILE found Get all configs with OLD_VER FMT 4*12
-    # Select only ones that contain -lp-interop
+    # Select only ones that contain LP_TAG
     if test "$CONFIG_FILE" = ""
     then
         E_OLD_VER=${OLD_VER/./*}
-        CONFIG_FILE=`grep -l "\-lp\-interop" $CONFIG_PATH/$(ls $CONFIG_PATH | grep -i $E_OLD_VER )`
+        CONFIG_FILE=`grep -l $LP_TAG $(find $CONFIG_PATH -name *$E_OLD_VER* )`
         CONFIG_FILE="$(basename "${CONFIG_FILE}")"
     fi
 
@@ -170,13 +187,14 @@ while IFS= read -r ENTRY; do
     echo "CONFIG FILE  = ${CONFIG_FILE}"
     echo "NEW CONFIG FILE = ${NEW_CONFIG_FILE}"
 
-    # Check if new config file exists and give warning else cp old to new
+    # Check if new config file exists and give warning 
     if test -f $CONFIG_PATH/$NEW_CONFIG_FILE
     then
-        echo "WARNING: ${CONFIG_PATH}/${NEW_CONFIG_FILE}. File already exists"
-    else 
-        cp $CONFIG_PATH/$CONFIG_FILE $CONFIG_PATH/$NEW_CONFIG_FILE
+        echo "WARNING: ${CONFIG_PATH}/${NEW_CONFIG_FILE}. File exists. Will be overwritten and updated"
     fi
+
+    # Copy config from old to new
+    cp $CONFIG_PATH/$CONFIG_FILE $CONFIG_PATH/$NEW_CONFIG_FILE
 
     # Set version to be sed correct
     SED_OLD_VER=${OLD_VER/./\\.}
@@ -207,12 +225,15 @@ while IFS= read -r ENTRY; do
     fi
 
     # Find cron and update
-    CRON=`grep cron: $CONFIG_PATH/$NEW_CONFIG_FILE`
-    NEW_CRON="${CRON%:*}: 0 6 $((DAY-2)) $MONTH "
-    echo "CRON         = ${CRON}"
-    echo "NEW CRON     = ${NEW_CRON}"
+    CRON=`grep -i cron: $CONFIG_PATH/$NEW_CONFIG_FILE`
+    CRON="${CRON//\*}"
+    while IFS= read -r i; do
+        NEW_CRON="${i%:*}: 0 6 $((DAY-2)) $MONTH "
+        echo "CRON         = ${i}"
+        echo "NEW CRON     = ${NEW_CRON}"
 
-    sed -i "s/$CRON/$NEW_CRON/g" $CONFIG_PATH/$NEW_CONFIG_FILE
+        sed -i "s/$i/$NEW_CRON/g" $CONFIG_PATH/$NEW_CONFIG_FILE
+    done < <(echo "$CRON")
 
     # Git add new config file
     git add $CONFIG_PATH/$NEW_CONFIG_FILE
