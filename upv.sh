@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    -h|--ehlp)
+    -h|--help)
       echo "Usage: upv.sh [options] -o ver -n ver [-f file | jobname]
 
 Update lp interop scenarios in openshift-ci to run on new platform version.
@@ -79,7 +79,7 @@ echo "MONTH        = ${MONTH}"
 echo "DAY          = ${DAY}"
 echo "OLD VERSION  = ${OLD_VER}"
 echo "NEW VERSION  = ${NEW_VER}"
-echo "INPUTT FILE  = ${INPUT_FILE}"
+echo "INPUT FILE   = ${INPUT_FILE}"
 echo "JOB NAME     = ${1}"
 echo "PLATFORM     = ${PLATFORM}"
 echo "LP_TAG       = ${LP_TAG}"
