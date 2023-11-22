@@ -1,6 +1,4 @@
 #!/bin/bash
-#set -o nounset
-set -o errexit
 set -o pipefail
 
 DAY=$( date +%-d )
@@ -37,6 +35,27 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    -h|--help)
+      echo "Usage: upv.sh [options] -o ver -n ver [-f file | jobname]
+
+Update lp interop scenarios in openshift-ci to run on new platform version.
+
+NOTE: Must be executed from openshift-ci's top level directory 'release'.
+
+Example: upv.sh -o 4.15 -n 4.16 periodic-ci-skupperproject-skupper-openshift-smoke-test-image-main-service-interconnect-ocp4.15-lp-interop-rhsi-interop-aws
+
+Options:
+    Required:
+        -o|--old_ver ver     - Old platform version.
+        -n|--new_ver ver     - New platform version.
+    Optional:
+        -p|--platform str    - Platform, str is ocp or hypershift. Default is ocp.
+        -f|--input_file file - Input file containing list of jobs to update. JSON format.
+                               See vault trigger file.
+    jobname                  - Scenario's job name.
+      "
+      exit 0
+      ;;
     -*|--*)
       echo "Unknown option $1"
       exit 1
@@ -60,18 +79,50 @@ echo "MONTH        = ${MONTH}"
 echo "DAY          = ${DAY}"
 echo "OLD VERSION  = ${OLD_VER}"
 echo "NEW VERSION  = ${NEW_VER}"
-echo "INPUTT FILE  = ${INPUT_FILE}"
+echo "INPUT FILE   = ${INPUT_FILE}"
 echo "JOB NAME     = ${1}"
 echo "PLATFORM     = ${PLATFORM}"
 echo "LP_TAG       = ${LP_TAG}"
 echo "PWD          = " `pwd`
 
+# Check that old and new platform versions supplied.
+if [ -z "$OLD_VER" ] || [ -z "$NEW_VER" ]
+then
+    echo "ERROR: OLD and NEW Platform versions must be supplied"
+    exit 1
+fi
+
+# If PLATFORM not ocp or hypershift then error
+if [[ $PLATFORM != "ocp" && $PLATFORM != "hypershift" ]]
+then
+    echo "ERROR: PLATFORM must be set to either 'ocp' or 'hypershift'"
+    exit 1
+fi
+
+# Get current directory and if not release error
+DIR=${PWD/*\//}
+if [[ $DIR != "release" ]]
+then
+    echo "ERROR: Must run from openshift-ci's top level directory: release"
+    exit 1
+fi
+
 # PROCESS JOBS
 if [ ! -z "$INPUT_FILE" ]
 then
+    if ! test -f $INPUT_FILE
+    then
+        echo "ERROR: Input file ${INPUT_FILE} dost not exist"
+        exit 1
+    fi
     JOBS=`jq -r '.[] | select(.active == true) | .job_name' "$INPUT_FILE"`
 else
     JOBS=$1
+    if [ -z "$JOBS" ]
+    then
+        echo "ERROR: No job name or input file given"
+        exit 1
+    fi
 fi
 
 # For each ENTRY (JOB) perform the following
@@ -82,7 +133,12 @@ while IFS= read -r ENTRY; do
     echo "ENTRY        = ${ENTRY}"
 
     # JOB Location and file of ENTRY (job)
-    JOB=`grep -Rl --exclude='.*' $ENTRY .`
+    JOB=`grep -Rl --exclude='.*' $ENTRY ./ci-operator/jobs`
+    if [ -z "$JOB" ]
+    then
+        echo "WARNING: JOB: ${ENTRY} does not exist"
+        continue
+    fi
     echo "JOB          = ${JOB}"
 
     # JOB_PATH path of JOB
