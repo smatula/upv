@@ -306,6 +306,7 @@ done < <(echo "$JOBS")
 make update
 
 # Update all JOB files new entry with NOTIFICATION
+eecho ""
 for (( i=0; i<${#JOBS_ARRAY[@]} ; i+=3 )) ; do
     OLD_JOBNAME="${JOBS_ARRAY[i]}"
     NEW_JOBNAME="${JOBS_ARRAY[i+2]}"
