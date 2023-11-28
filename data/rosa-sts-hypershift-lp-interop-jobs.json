@@ -1,0 +1,11 @@
+[
+  {"job_name": "periodic-ci-jaegertracing-jaeger-operator-main-jaeger-product-hypershift-4.14-lp-rosa-hypershift-jaeger-product-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-kiali-kiali-master-kiali-hypershift-4.14-lp-rosa-hypershift-aws-lp-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-maistra-maistra-test-tool-main-servicemesh-hypershift-4.14-lp-rosa-hypershift-servicemesh-aws-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-openshift-jenkins-release-4.14-jenkins-hypershift4.14-aws-jenkins-lp-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-redhat-developer-service-binding-operator-release-v1.4.x-4.14-acceptance-lp-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-rhpit-interop-tests-main-mtc-hypershift-4.14-lp-rosa-hypershift-mtc-aws-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-rhpit-interop-tests-main-openshift-pipelines-hypershift-4.14-lp-rosa-hypershift-openshift-pipelines-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-rhpit-interop-tests-main-serverless-hypershift-4.14-lp-rosa-hypershift-serverless-aws-rosa-hypershift", "active": true},
+  {"job_name": "periodic-ci-rhpit-interop-tests-main-web-terminal-hypershift-4.14-lp-rosa-hypershift-web-terminal-aws-rosa-hypershift", "active": true}
+]
