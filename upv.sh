@@ -17,19 +17,65 @@ Options:
         -n|--new_ver ver     - New platform version.
     Optional:
         -p|--platform str    - Platform, str is ocp or hypershift. Default is ocp.
-        -t|--lp_tag str      - Overide default tag, -lp-interop for ocp and -lp-rosa-hypershift for hypershift
+        -l|--lp_tag str      - Overide default tag, -lp-interop for ocp and -lp-rosa-hypershift for hypershift
                                str is new tag. Searches for tag in config file name or its contents.
-        -i|--text            - Flag input file format is text. Single job name per line.
+        -t|--text            - Flag input file format is text. Single job name per line.
+        -f|--force           - Force job names to be of same version as inputed Old platform version.
         -z|--z_stream        - [Not implemented] Flag indicating to update old version config file to be z-stream, stream: stable
-        -f|--input_file file - Input file containing list of jobs to update. JSON format.
+        -i|--input_file file - Input file containing list of job names to update. JSON format.
                                See vault trigger file.
+        -h|--help            - This message.
     jobnames                 - Scenario's job name/s seperated by space.
     "
 }
 
+# Set name on version
+gen_new_name() {
+    NAME=$1
+    OLDVER=$2
+    NEWVER=$3
+
+    # NEW_NAME using FMT1 (4.12)
+    NEW_NAME=${NAME//${OLDVER}/${NEWVER}}
+
+    # NEW_NAME using FMT2 (4-12)
+    E_OLD_VER=${OLDVER/./-}
+    E_NEW_VER=${NEWVER/./-}
+    NEW_NAME=${NEW_NAME//${E_OLD_VER}/${E_NEW_VER}}
+
+    # NEW_NAME using FMT3 (412)
+    E_OLD_VER=${OLDVER/./""}
+    E_NEW_VER=${NEWVER/./""}
+    NEW_NAME=${NEW_NAME//${E_OLD_VER}/${E_NEW_VER}}
+
+    # If same (Name not changed) then set to empty
+    if test "$NAME" = "$NEW_NAME"
+    then
+        NEW_NAME=""
+    fi
+
+    echo "$NEW_NAME"
+}
+
+get_ver() {
+    NAME=$1
+    VER=$2
+    major=${VER%.*}
+    sstr="^$major"
+    version=`echo $NAME | grep -Eo '?[0-9]+([.-]+[0-9]+)?' | grep "$sstr" | head -1`
+    version=${version/-/.}
+    if [[ "$version" =~ ^[0-9]+\.+[0-9]+?$ ]]
+    then
+       echo $version
+    else
+       version=`echo $version | sed "s/$sstr/&./g"`
+       echo $version
+    fi
+}
+
 # Initialize
-DAY=$( date +%-d )
-MONTH=$( date +%-m )
+DAY=$( date -d '-2 day' '+%-d' )
+MONTH=$(date -d '-2 day' '+%-m' )
 JOBS_ARRAY=()
 JOBS=""
 
@@ -41,6 +87,9 @@ LP_TAG="\-lp\-interop"
 
 # default Z_STREAM
 Z_STREAM="false"
+
+# default FORCE
+FORCE="false"
 
 # Default FILE_FMT
 FILE_FMT="json"
@@ -55,7 +104,7 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    -t|--lp_tag)
+    -l|--lp_tag)
       LP_TAG="$2"
       shift # past argument
       shift # past value
@@ -70,13 +119,17 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
-    -f|--input_file)
+    -i|--input_file)
       INPUT_FILE="$2"
       shift # past argument
       shift # past value
       ;;
-    -i|--text)
+    -t|--text)
       FILE_FMT="txt"
+      shift # past argument
+      ;;
+    -f|--force)
+      FORCE="true"
       shift # past argument
       ;;
     -z|--z_stream)
@@ -102,18 +155,19 @@ done
 
 set -- "${POSITIONAL_ARGS[@]}" # restore positional parameters
 
+# Set LP_TAG for hypershift
 if [[ $PLATFORM == "hypershift" ]]
 then
      LP_TAG="\-lp\-rosa\-hypershift"
 fi
 
 # INPUT VALUES
-echo "MONTH        = ${MONTH}"
-echo "DAY          = ${DAY}"
+echo "CRON MONTH   = ${MONTH}"
+echo "CRON DAY     = ${DAY}"
 echo "OLD VERSION  = ${OLD_VER}"
 echo "NEW VERSION  = ${NEW_VER}"
 echo "INPUT FILE   = ${INPUT_FILE}"
-echo "JOB NAME     = ${1}"
+echo "JOB NAME     = ${JOBS}"
 echo "PLATFORM     = ${PLATFORM}"
 echo "LP_TAG       = ${LP_TAG}"
 echo "PWD          = " `pwd`
@@ -195,8 +249,33 @@ fi
 # For each ENTRY (JOB) perform the following
 while IFS= read -r ENTRY; do
     E_OLD_VER=""
+    CONFIG_FILE=""
+    NEW_CONFIG_FILE=""
 
     # ENTRY single job name
+    if [ -z "$ENTRY" ]
+    then
+        continue
+    fi
+
+    echo ""
+    echo "--------------------------------------------------------------------------------"
+    echo ""
+
+    # Check version
+    JOB_VER=$(get_ver $ENTRY $OLD_VER)
+    if [[ $JOB_VER != $OLD_VER ]]
+    then
+       if [[ $FORCE == "true" ]]
+       then
+           echo "WARNING: Forcing JOB/ENTRY to be version:$OLD_VER"
+           ENTRY=$(gen_new_name $ENTRY $JOB_VER $OLD_VER)
+       else
+           echo "ERROR: Skipping: OLD_VER:$OLD_VER does not match version for JOB:$ENTRY"
+           continue
+       fi
+    fi
+
     echo ""
     echo "ENTRY        = ${ENTRY}"
 
@@ -204,10 +283,11 @@ while IFS= read -r ENTRY; do
     JOB=`grep -Rl --exclude='.*' $ENTRY ./ci-operator/jobs`
     if [ -z "$JOB" ]
     then
-        echo "WARNING: JOB: ${ENTRY} does not exist"
+        echo "ERROR: Skipping:  JOB: ${ENTRY} does not exist"
         continue
     fi
-    echo "JOB          = ${JOB}"
+
+    echo "JOB FILE     = ${JOB}"
 
     # Set JOB_PATH and CONFIG_PATH
     # JOB_PATH path of JOB's file
@@ -217,31 +297,9 @@ while IFS= read -r ENTRY; do
 
     echo "JOB PATH     = ${JOB_PATH}"
 
-    # Set NEW_JOB name using FMT1 (4.12) - ENTRY name with new version
-    NEW_JOB=${ENTRY//${OLD_VER}/${NEW_VER}}
+    NEW_JOB=$(gen_new_name $ENTRY $OLD_VER $NEW_VER)
+
     echo "NEW JOB      = ${NEW_JOB}"
-
-    # If same (Name not changed) set NEW_JOB using FMT2 (4-12)
-    if test "$ENTRY" = "$NEW_JOB"
-    then
-        E_OLD_VER=${OLD_VER/./-}
-        E_NEW_VER=${NEW_VER/./-}
-
-        echo "FMT2 OLD VER  = ${E_OLD_VER}"
-        echo "FMT2 NEW VER  = ${E_NEW_VER}"
-        NEW_JOB=${ENTRY//${E_OLD_VER}/${E_NEW_VER}}
-    fi
-
-    # If same (Name not changed) set NEW_JOB using FMT3 (412)
-    if test "$ENTRY" = "$NEW_JOB"
-    then
-        E_OLD_VER=${OLD_VER/./""}
-        E_NEW_VER=${NEW_VER/./""}
-
-        echo "FMT3 OLD VER  = ${E_OLD_VER}"
-        echo "FMT3 NEW VER  = ${E_NEW_VER}"
-        NEW_JOB=${ENTRY//${E_OLD_VER}/${E_NEW_VER}}
-    fi
 
     echo "CONFIG PATH  = ${CONFIG_PATH}"
 
@@ -279,38 +337,28 @@ while IFS= read -r ENTRY; do
     if test "$CONFIG_FILE" = ""
     then
         E_OLD_VER=${OLD_VER/./*}
+        SFILES=`find $CONFIG_PATH -name *$E_OLD_VER*`
+        if [ -z "$SFILES" ]
+        then
+             echo "WARNING: No config file found. Verify"
+             continue
+        fi
         CONFIG_FILE=`grep -l $LP_TAG $(find $CONFIG_PATH -name *$E_OLD_VER* )`
         CONFIG_FILE="$(basename "${CONFIG_FILE}")"
     fi
 
-    # Set NEW_CONFIG_FILE FMT1 (4.12)
-    NEW_CONFIG_FILE=${CONFIG_FILE//${OLD_VER}/${NEW_VER}}
-
-    # Same then use FMT2 (4-12)
-    if test "$CONFIG_FILE" = "$NEW_CONFIG_FILE"
-    then
-        E_OLD_VER=${OLD_VER/./-}
-        E_NEW_VER=${NEW_VER/./-}
-
-        echo "FMT2 OLD VER  = ${E_OLD_VER}"
-        echo "FMT2 NEW VER  = ${E_NEW_VER}"
-        NEW_CONFIG_FILE=${CONFIG_FILE//${E_OLD_VER}/${E_NEW_VER}}
-    fi
-
-    # Same then use FMT3 (412)
-    if test "$CONFIG_FILE" = "$NEW_CONFIG_FILE"
-    then
-        E_OLD_VER=${OLD_VER/./""}
-        E_NEW_VER=${NEW_VER/./""}
-
-        echo "FMT3 OLD VER  = ${E_OLD_VER}"
-        echo "FMT3 NEW VER  = ${E_NEW_VER}"
-        NEW_CONFIG_FILE=${CONFIG_FILE//${E_OLD_VER}/${E_NEW_VER}}
-    fi
+    NEW_CONFIG_FILE=$(gen_new_name $CONFIG_FILE $OLD_VER $NEW_VER)
 
     # Print old and new CONFIG_FILE
     echo "CONFIG FILE  = ${CONFIG_FILE}"
     echo "NEW CONFIG FILE = ${NEW_CONFIG_FILE}"
+
+    # Check if config file exists for old version
+    if ! test -f $CONFIG_PATH/$CONFIG_FILE
+    then
+        echo "WARNING: ${CONFIG_PATH}/${CONFIG_FILE}. Does not exist. Verify"
+        continue
+    fi
 
     # Check if new config file exists and give warning 
     if test -f $CONFIG_PATH/$NEW_CONFIG_FILE
@@ -328,14 +376,23 @@ while IFS= read -r ENTRY; do
     # Update version in config file
     sed -i "s/$SED_OLD_VER/$SED_NEW_VER/g" $CONFIG_PATH/$NEW_CONFIG_FILE
 
-    # If alternate format used also perform update with alternate fmt also
-    if [[ ! -z "$E_OLD_VER" ]]
-    then
-        # Set version to be sed correct
-        SED_E_OLD_VER=${E_OLD_VER/./\\.}
-        SED_E_NEW_VER=${E_NEW_VER/./\\.}
-        sed -i "s/$SED_E_OLD_VER/$SED_E_NEW_VER/g" $CONFIG_PATH/$NEW_CONFIG_FILE
-    fi
+    # Update alternate fmt2
+    E_OLD_VER=${OLD_VER/./-}
+    E_NEW_VER=${NEW_VER/./-}
+
+    # Set version to be sed correct
+    SED_E_OLD_VER=${E_OLD_VER/./\\.}
+    SED_E_NEW_VER=${E_NEW_VER/./\\.}
+    sed -i "s/$SED_E_OLD_VER/$SED_E_NEW_VER/g" $CONFIG_PATH/$NEW_CONFIG_FILE
+
+    # Update alternate fmt3
+    E_OLD_VER=${OLD_VER/./""}
+    E_NEW_VER=${NEW_VER/./""}
+
+    # Set version to be sed correct
+    SED_E_OLD_VER=${E_OLD_VER/./\\.}
+    SED_E_NEW_VER=${E_NEW_VER/./\\.}
+    sed -i "s/$SED_E_OLD_VER/$SED_E_NEW_VER/g" $CONFIG_PATH/$NEW_CONFIG_FILE
 
     # Handle any special processing for scnearios here....
     # Scenarios With Special processing
@@ -357,7 +414,7 @@ while IFS= read -r ENTRY; do
     CRON=`grep -i cron: $CONFIG_PATH/$NEW_CONFIG_FILE`
     CRON="${CRON//\*}"
     while IFS= read -r i; do
-        NEW_CRON="${i%:*}: 0 6 $((DAY-2)) $MONTH "
+        NEW_CRON="${i%:*}: 0 6 $(($DAY)) $MONTH "
         echo "CRON         = ${i}"
         echo "NEW CRON     = ${NEW_CRON}"
 
@@ -377,13 +434,18 @@ while IFS= read -r ENTRY; do
     JOBS_ARRAY+=("${ENTRY}")
     JOBS_ARRAY+=("${JOB}")
     JOBS_ARRAY+=("${NEW_JOB}")
-    echo ""
-    echo "--------------------------------------------------------------------------------"
 
 done < <(echo "$JOBS")
 
 # Completed updating all config files perform a make update
-make update
+echo ""
+echo "--------------------------------------------------------------------------------"
+echo ""
+
+if [[ ${#JOBS_ARRAY[@]} > 0 ]]
+then
+    make update
+fi
 
 # Update all JOB files new entry with NOTIFICATION
 for (( i=0; i<${#JOBS_ARRAY[@]} ; i+=3 )) ; do
@@ -463,5 +525,4 @@ for (( i=0; i<${#JOBS_ARRAY[@]} ; i+=3 )) ; do
         fi
     fi
 done
-
 
