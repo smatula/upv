@@ -3,7 +3,7 @@ set -o pipefail
 
 # Function to display usage/help
 usage () {
-    echo "Usage: upv.sh [options] -o ver -n ver [-f file | jobnames]
+    echo "Usage: upv.sh [options] -o ver -n ver [-i file | jobnames]
 
 Update lp interop scenarios in openshift-ci to run on new platform version.
 
@@ -17,19 +17,21 @@ Options:
         -n|--new_ver ver     - New platform version.
     Optional:
         -p|--platform str    - Platform, str is ocp or hypershift. Default is ocp.
-        -l|--lp_tag str      - Overide default tag, -lp-interop for ocp and -lp-rosa-hypershift for hypershift
+        -l|--lp_tag str      - Override default tag, -lp-interop for ocp and -lp-rosa-hypershift for hypershift
                                str is new tag. Searches for tag in config file name or its contents.
         -t|--text            - Flag input file format is text. Single job name per line.
-        -f|--force           - Force job names to be of same version as inputed Old platform version.
+        -f|--force           - Force job names to be of same version as inputted Old platform version.
         -z|--z_stream        - [Not implemented] Flag indicating to update old version config file to be z-stream, stream: stable
         -i|--input_file file - Input file containing list of job names to update. JSON format.
                                See vault trigger file.
         -h|--help            - This message.
-    jobnames                 - Scenario's job name/s seperated by space.
+    jobnames                 - Scenario's job name/s separated by a space.
     "
 }
 
-# Set name on version
+# Generate name based on platform version supplied
+# Input: name old_ver new_ver
+# Output: Generated Name
 gen_new_name() {
     NAME=$1
     OLDVER=$2
@@ -57,12 +59,23 @@ gen_new_name() {
     echo "$NEW_NAME"
 }
 
+# Get platform version from name
+# Input: name old_ver
+# Output: version
 get_ver() {
     NAME=$1
     VER=$2
+
+    # Set major version
     major=${VER%.*}
+
+    # Set search string
     sstr="^$major"
+
+    # Get version #.## or #-## or ###
     version=`echo $NAME | grep -Eo '?[0-9]+([.-]+[0-9]+)?' | grep "$sstr" | head -1`
+
+    # Convert to proper format #.##
     version=${version/-/.}
     if [[ "$version" =~ ^[0-9]+\.+[0-9]+?$ ]]
     then
