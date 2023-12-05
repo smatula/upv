@@ -90,7 +90,6 @@ get_ver() {
 DAY=$( date -d '-2 day' '+%-d' )
 MONTH=$(date -d '-2 day' '+%-m' )
 JOBS_ARRAY=()
-JOBS=""
 
 # Default PLATFORM
 PLATFORM="ocp"
@@ -160,7 +159,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       POSITIONAL_ARGS+=("$1") # save positional arg
-      JOBS=`echo $JOBS;printf %"s\n" ${1}`
+      if [ -z "$JOBS" ]
+      then
+          JOBS=`printf %"s\n" ${1}`
+      else
+          JOBS=`echo "$JOBS";printf %"s\n" ${1}`
+      fi
       shift # past argument
       ;;
   esac
@@ -180,7 +184,7 @@ echo "CRON DAY     = ${DAY}"
 echo "OLD VERSION  = ${OLD_VER}"
 echo "NEW VERSION  = ${NEW_VER}"
 echo "INPUT FILE   = ${INPUT_FILE}"
-echo "JOB NAME     = ${JOBS}"
+echo "JOB NAMES    = ${JOBS}"
 echo "PLATFORM     = ${PLATFORM}"
 echo "LP_TAG       = ${LP_TAG}"
 echo "PWD          = " `pwd`
@@ -266,6 +270,7 @@ while IFS= read -r ENTRY; do
     NEW_CONFIG_FILE=""
 
     # ENTRY single job name
+    # if empty get next
     if [ -z "$ENTRY" ]
     then
         continue
@@ -508,7 +513,7 @@ for (( i=0; i<${#JOBS_ARRAY[@]} ; i+=3 )) ; do
     CHECK_NOTIFICATION=`sed -n "/${NEW_JOBNAME}/,/spec:/{/${NEW_JOBNAME}/b;/spec/b;p}" $NEW_JOB`
 
     # If no Notification then add to new job
-    if [ -z "$CHECK_NOTIFICATION" ]
+    if [ -n "$NOTIFICATION" ] && [ -z "$CHECK_NOTIFICATION" ]
     then
         sed -i "/${NEW_JOBNAME}/r tmp_slack.txt" $NEW_JOB
     fi
