@@ -55,6 +55,8 @@ Script to update lp interop scenarios to run on new platform version.
 5. Runs make update
 6. Update periodic jobs to contain correct slack notification for new job.
 7. Performs git add to new/updated jobs files (periodic and presubmits) if exist.
-8. Check output for ERRORs and WARNINGs.
-9. Verify changes.
+
+After running
+1. Check output for ERRORs and WARNINGs.
+2. Verify changes/updates are correct.
  
