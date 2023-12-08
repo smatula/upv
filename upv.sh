@@ -30,7 +30,7 @@ Options:
 }
 
 # Generate name based on platform version supplied
-# Input: name old_ver new_ver
+# Input: name, old_ver, new_ver
 # Output: Generated Name
 gen_new_name() {
     NAME=$1
@@ -60,7 +60,7 @@ gen_new_name() {
 }
 
 # Get platform version from name
-# Input: name old_ver
+# Input: name, old_ver
 # Output: version
 get_ver() {
     NAME=$1
@@ -84,6 +84,74 @@ get_ver() {
        version=`echo $version | sed "s/$sstr/&./g"`
        echo $version
     fi
+}
+
+# Find config file for job name given
+# Inputs: config_path, job_name
+get_conf_file() {
+    # Set Args
+    CONFIG_FILE_PATH=$1
+    JOB_NAME=$2
+
+    # Intialize
+    FN=""
+
+    # Set token count
+    COUNT=`awk -F"-" '{print NF-1}' <<< "${JOB_NAME}"`
+    COUNT=$(( $COUNT + 1 ))
+
+    # Find config file based on jobs name
+    for (( i=3; i<=${COUNT} ; i+=1 )) ; do
+
+        # Build file name
+        if [ $i == 3 ]
+        then
+          FN=$(echo $JOB_NAME| cut -d'-' -f $i)
+        else
+          FN="$FN"-"$(echo $JOB_NAME| cut -d'-' -f $i)"
+        fi
+
+        # Check matches of file name in config file path
+        C_FILE=`ls $CONFIG_FILE_PATH | grep -i $FN`
+        NC=`wc -w <<< "$C_FILE"`
+
+        # No match then try with double underscore seperator
+        if [[ $NC -eq 0 ]]
+        then
+            FN=`echo "$FN" | sed 's/\(.*\)-/\1__/'`
+            C_FILE=`ls $CONFIG_FILE_PATH | grep -i $FN`
+            NC=`wc -w <<< "$C_FILE"`
+        fi
+
+        # Check for tag
+        FIRST=$(echo $JOB_NAME| cut -d'-' -f 1)
+        SECOND=$(echo $JOB_NAME| cut -d'-' -f 2)
+        JN=`echo "$FN" | sed 's/\(.*\)__/\1-/'`
+        JN=`echo "$FIRST-$SECOND-$JN-"`
+        TAG=`sed "s/$JN//" <<< "${JOB_NAME}"`
+
+        if [ -n "$TAG" ]
+        then
+            CONFS=($C_FILE)
+            for j in "${CONFS[@]}"
+            do
+                TAG_CONFIGS=`grep -l "$TAG" "$CONFIG_FILE_PATH/$j"`
+                if [ -n "$TAG_CONFIGS" ]
+                then
+                    C_FILE=$j
+                    NC=`wc -w <<< "$C_FILE"`
+                    break
+                fi
+            done
+        fi
+
+        # Down to single match - We have the config
+        if [[ $NC -eq 1 ]]
+        then
+            break
+        fi
+    done
+    echo $C_FILE
 }
 
 # Initialize
@@ -321,34 +389,14 @@ while IFS= read -r ENTRY; do
 
     echo "CONFIG PATH  = ${CONFIG_PATH}"
 
-    # Find CONFIG_FILE in CONFIG_PATH Searching for files with LP_TAG, PLATFORM and OLD_VER
-    CONFIG_FILE=`ls $CONFIG_PATH | grep -i $LP_TAG | grep -i $PLATFORM | grep -i $OLD_VER || :`
+    # Get CONFIG_FILE using job name
+    CONFIG_FILE="$(get_conf_file $CONFIG_PATH $ENTRY)"
 
-    # If more than 1 config found get PROD from scenario label
-    # If ENTRY contains PROD then we have our config 
-    NUM_CONFIGS=`wc -w <<< "$CONFIG_FILE"`
-    if [[ $NUM_CONFIGS -gt 1 ]]
+    if test "$CONFIG_FILE" = ""
     then
-       echo "More than one"
-       CONFIGS=($CONFIG_FILE)
-       CONFIG_FILE=""
-       for i in "${CONFIGS[@]}"
-       do
-           PROD=`sed -n -e 's/^.*scenario //p' $CONFIG_PATH/$i`
-           if [ -z "$PROD" ]
-           then
-               PROD=`sed "s/__/&\n/;s/.*\n//;s/-$PLATFORM/\n&/;s/\n.*//" <<< "$i"`
-           fi
-
-           echo "PROD         = ${PROD}"
-           if [[ $ENTRY == *"$PROD"* ]]
-           then
-               CONFIG_FILE=$i
-               break
-           fi
-           # do whatever on $i
-       done
-    fi 
+        # Find CONFIG_FILE in CONFIG_PATH Searching for files with LP_TAG, PLATFORM and OLD_VER
+        CONFIG_FILE=`ls $CONFIG_PATH | grep -i $LP_TAG | grep -i $PLATFORM | grep -i $OLD_VER || :`
+    fi
 
     # No CONFIG_FILE found Get all configs with OLD_VER FMT 4*12
     # Select only ones that contain LP_TAG
@@ -361,8 +409,49 @@ while IFS= read -r ENTRY; do
              echo "WARNING: No config file found. Verify"
              continue
         fi
-        CONFIG_FILE=`grep -l $LP_TAG $(find $CONFIG_PATH -name *$E_OLD_VER* )`
-        CONFIG_FILE="$(basename "${CONFIG_FILE}")"
+        CONFIG_FILE=`grep -l $LP_TAG $(find $CONFIG_PATH -name *$E_OLD_VER*)`
+        CONFIGS=($CONFIG_FILE)
+        for i in "${!CONFIGS[@]}"
+        do
+            CONFIGS[$i]=`basename ${CONFIGS[$i]}`
+        done
+
+        CONFIG_FILE=$(printf " %s" "${CONFIGS[@]}")
+        CONFIG_FILE=${CONFIG_FILE:1}
+    fi
+
+    # If more than 1 config found get PROD from scenario label
+    # If ENTRY contains PROD then we have our config 
+    NUM_CONFIGS=`wc -w <<< "$CONFIG_FILE"`
+    if [[ $NUM_CONFIGS -gt 1 ]]
+    then
+       echo "More than one"
+       CONFIGS=($CONFIG_FILE)
+       IFS=$'\n' CONFIGS=($(sort -r <<<"${CONFIGS[*]}"))
+       unset IFS
+       CONFIG_FILE=""
+       for i in "${CONFIGS[@]}"
+       do
+           PROD=`sed -n -e 's/^.*scenario //p' $CONFIG_PATH/$i`
+           if [ -z "$PROD" ]
+           then
+               PROD=`sed "s/__/&\n/;s/.*\n//;s/-$PLATFORM/\n&/;s/\n.*//;s/.yaml/\n&/;s/\n.*//" <<< "$i"`
+           fi
+
+           echo "PROD         = ${PROD}"
+           if [[ $ENTRY == *"$PROD"* ]]
+           then
+               CONFIG_FILE=$i
+               break
+           fi
+           # do whatever on $i
+       done
+    fi 
+
+    if test "$CONFIG_FILE" = ""
+    then
+        echo "ERROR: No Config file found"
+        continue
     fi
 
     NEW_CONFIG_FILE=$(gen_new_name $CONFIG_FILE $OLD_VER $NEW_VER)
